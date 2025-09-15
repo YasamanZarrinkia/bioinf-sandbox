@@ -1,29 +1,38 @@
-name: Week 1 (Python: data4)
+name: Week 1 (Python data4)
 on: [push]
 
 jobs:
   data4:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - name: Checkout
+        uses: actions/checkout@v5
 
-      - name: Set up Python
+      - name: Setup Python
         uses: actions/setup-python@v6
         with:
           python-version: '3.13'
 
       - name: Prepare layout and stack
+        shell: bash
         run: |
           set -euxo pipefail
           mkdir -p week1/test/py
+          # make code see datasets as ./data (same as your local runs)
           ln -sfn ../../data week1/code/genome-assembly/data
+          # raise stack for deep DFS
           ulimit -s 8192000
 
-      - name: Run data4 and print results
+      - name: Run data4
+        shell: bash
         run: |
           set -euxo pipefail
           cd week1/code/genome-assembly
           /usr/bin/time -p python3 main.py data/data4 > ../../test/py/data4.stdout 2> ../../test/py/data4.stderr
+
+      - name: Print data4 results (Runtime + N50)
+        shell: bash
+        run: |
           python3 - <<'PY'
 import re
 from pathlib import Path
@@ -31,10 +40,11 @@ from pathlib import Path
 out = Path('week1/test/py')
 contigs = Path('week1/data/data4/contig.fasta')
 
-# Parse runtime (seconds) from /usr/bin/time -p stderr
+# Parse "real" seconds from /usr/bin/time -p stderr
 secs = 'NA'
-if (out/'data4.stderr').exists():
-    for line in (out/'data4.stderr').read_text().splitlines():
+stderr = out/'data4.stderr'
+if stderr.exists():
+    for line in stderr.read_text().splitlines():
         if line.startswith('real '):
             secs = line.split()[1]; break
 
@@ -46,26 +56,30 @@ def fmt_hms(sec):
         return sec
 
 # N50 from final contigs FASTA
-lens=[]; buf=[]
+lens = []
+buf = []
 if contigs.exists():
     with contigs.open('r', errors='ignore') as f:
         for line in f:
             t=line.strip()
-            if not t: continue
+            if not t: 
+                continue
             if t.startswith('>'):
                 if buf:
                     lens.append(sum(map(len,buf))); buf=[]
             else:
-                if re.fullmatch(r'[ACGTNacgtn]+', t): buf.append(t)
-    if buf: lens.append(sum(map(len,buf)))
+                if re.fullmatch(r'[ACGTNacgtn]+', t):
+                    buf.append(t)
+    if buf:
+        lens.append(sum(map(len,buf)))
 
-n50='NA'
+n50 = 'NA'
 if lens:
     lens.sort(reverse=True); tot=sum(lens); acc=0
     for L in lens:
-        acc+=L
-        if acc*2>=tot:
-            n50=str(L); break
+        acc += L
+        if acc*2 >= tot:
+            n50 = str(L); break
 
 print("Dataset\tLanguage\tRuntime\tN50")
 print(f"data4\tpython\t{fmt_hms(secs)}\t{n50}")
