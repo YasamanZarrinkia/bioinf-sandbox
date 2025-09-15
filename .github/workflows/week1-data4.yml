@@ -1,86 +1,51 @@
-name: Week 1 (Python data4)
+name: Week 1 data4
 on: [push]
 
 jobs:
   data4:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v5
+      - uses: actions/checkout@v5
 
-      - name: Setup Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: '3.13'
-
-      - name: Prepare layout and stack
+      - name: Run data4 on Ubuntu and print results
         shell: bash
         run: |
           set -euxo pipefail
+
+          # Ensure expected folders exist (in case they're gitignored)
           mkdir -p week1/test/py
-          # make code see datasets as ./data (same as your local runs)
+
+          # Make code see datasets as ./data (same as local runs)
           ln -sfn ../../data week1/code/genome-assembly/data
-          # raise stack for deep DFS
+
+          # Raise stack to avoid segfault on deep recursion
           ulimit -s 8192000
 
-      - name: Run data4
-        shell: bash
-        run: |
-          set -euxo pipefail
+          # Run the assembler; capture stdout/stderr like you did locally
           cd week1/code/genome-assembly
           /usr/bin/time -p python3 main.py data/data4 > ../../test/py/data4.stdout 2> ../../test/py/data4.stderr
+          cd - >/dev/null
 
-      - name: Print data4 results (Runtime + N50)
-        shell: bash
-        run: |
-          python3 - <<'PY'
-import re
-from pathlib import Path
+          # Read runtime (seconds) and format as H:MM:SS
+          secs=$(awk '/^real/{print $2}' week1/test/py/data4.stderr)
+          hms=$(awk -v s="$secs" 'BEGIN{h=int(s/3600); s-=h*3600; m=int(s/60); s-=m*60; printf("%d:%02d:%02d\n",h,m,int(s+0.5))}')
 
-out = Path('week1/test/py')
-contigs = Path('week1/data/data4/contig.fasta')
+          # Compute N50 from final contigs FASTA (multi-line sequences supported)
+          n50=$(
+            awk 'BEGIN{len=0}
+                 /^>/{ if(len){ print len; len=0 } ; next }
+                 { gsub(/[^ACGTNacgtn]/,""); len+=length($0) }
+                 END{ if(len) print len }' week1/data/data4/contig.fasta \
+            | sort -nr \
+            | awk '{a[NR]=$1; sum+=$1}
+                   END{
+                     half=sum/2; acc=0;
+                     for(i=1;i<=NR;i++){
+                       acc+=a[i];
+                       if(acc>=half){ print a[i]; exit }
+                     }
+                   }'
+          )
 
-# Parse "real" seconds from /usr/bin/time -p stderr
-secs = 'NA'
-stderr = out/'data4.stderr'
-if stderr.exists():
-    for line in stderr.read_text().splitlines():
-        if line.startswith('real '):
-            secs = line.split()[1]; break
-
-def fmt_hms(sec):
-    try:
-        s=float(sec); h=int(s//3600); s-=h*3600; m=int(s//60); s-=m*60
-        return f"{h}:{m:02d}:{int(round(s)):02d}"
-    except Exception:
-        return sec
-
-# N50 from final contigs FASTA
-lens = []
-buf = []
-if contigs.exists():
-    with contigs.open('r', errors='ignore') as f:
-        for line in f:
-            t=line.strip()
-            if not t: 
-                continue
-            if t.startswith('>'):
-                if buf:
-                    lens.append(sum(map(len,buf))); buf=[]
-            else:
-                if re.fullmatch(r'[ACGTNacgtn]+', t):
-                    buf.append(t)
-    if buf:
-        lens.append(sum(map(len,buf)))
-
-n50 = 'NA'
-if lens:
-    lens.sort(reverse=True); tot=sum(lens); acc=0
-    for L in lens:
-        acc += L
-        if acc*2 >= tot:
-            n50 = str(L); break
-
-print("Dataset\tLanguage\tRuntime\tN50")
-print(f"data4\tpython\t{fmt_hms(secs)}\t{n50}")
-PY
+          echo -e "Dataset\tLanguage\tRuntime\tN50"
+          echo -e "data4\tpython\t${hms}\t${n50}"
