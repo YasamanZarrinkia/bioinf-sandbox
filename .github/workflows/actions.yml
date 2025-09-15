@@ -1,6 +1,5 @@
 name: Github CI
 on: [push]
-
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -8,97 +7,21 @@ jobs:
       - run: echo "🎉 The job was automatically triggered by a ${{ github.event_name }} event."
       - run: echo "🐧 This job is now running on a ${{ runner.os }} server hosted by GitHub!"
       - run: echo "🔎 The name of your branch is ${{ github.ref }} and your repository is ${{ github.repository }}."
-
       - name: Install Codon
         run: |
-          set -euxo pipefail
-          mkdir -p "${HOME}/.codon"
-          curl -L https://github.com/exaloop/codon/releases/download/v0.19.3/codon-linux-x86_64.tar.gz \
-            | tar zxvf - --strip-components=1 -C "${HOME}/.codon"
-          curl -L https://github.com/exaloop/seq/releases/download/v0.11.5/seq-linux-x86_64.tar.gz \
-            | tar zxvf - -C "${HOME}/.codon/lib/codon/plugins"
-          echo "${HOME}/.codon/bin" >> "$GITHUB_PATH"
-
+          mkdir -p ${HOME}/.codon
+          curl -L https://github.com/exaloop/codon/releases/download/v0.19.3/codon-linux-x86_64.tar.gz | tar zxvf - --strip-components=1 -C ${HOME}/.codon
+          curl -L https://github.com/exaloop/seq/releases/download/v0.11.5/seq-linux-x86_64.tar.gz | tar zxvf - -C ${HOME}/.codon/lib/codon/plugins
+          export PATH=${PATH}:${HOME}/.codon/bin
       - name: Check out repository code
         uses: actions/checkout@v5
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.13'
-
       - name: Set up Codon Python bridge
         run: |
-          set -euxo pipefail
-          python -V
-          pip install --upgrade pip
           pip install find_libpython
-          export CODON_PYTHON="$(python -c 'import find_libpython,sys;sys.stdout.write(find_libpython.find_libpython())')"
+          export CODON_PYTHON=$(find_libpython)
           echo "Found Python at: ${CODON_PYTHON}"
-
       - run: echo "💡 The ${{ github.repository }} repository has been cloned to the runner."
       - run: echo "🖥️ The workflow is now ready to test your code on the runner."
-
-      # Week 1 (Python): run data4 on Linux with big stack and print a one-row table
-      - name: Week 1 (Python: data4)
-        run: |
-          set -euxo pipefail
-
-          # Make code see datasets as ./data (same layout as local)
-          ln -sfn ../../data week1/code/genome-assembly/data
-
-          # Increase stack for deep DFS
-          ulimit -s 8192000
-
-          cd week1/code/genome-assembly
-          /usr/bin/time -p python3 main.py data/data4 > ../../test/py/data4.stdout 2> ../../test/py/data4.stderr
-
-          # Compute N50 from final contigs and print a one-row table
-          python3 - <<'PY'
-import re, sys
-from pathlib import Path
-
-out = Path('week1/test/py')
-contigs = Path('week1/data/data4/contig.fasta')
-
-# Parse /usr/bin/time -p 'real' seconds
-secs = 'NA'
-for line in (out/'data4.stderr').read_text().splitlines():
-    if line.startswith('real '):
-        secs = line.split()[1]
-        break
-try:
-    s=float(secs); h=int(s//3600); s-=h*3600; m=int(s//60); s-=m*60
-    hms=f"{h}:{m:02d}:{int(round(s)):02d}"
-except Exception:
-    hms=secs
-
-# N50 from FASTA
-lens=[]; buf=[]
-with contigs.open('r', errors='ignore') as f:
-    for line in f:
-        line=line.strip()
-        if not line: 
-            continue
-        if line.startswith('>'):
-            if buf:
-                lens.append(sum(map(len,buf)))
-                buf=[]
-        else:
-            if re.fullmatch(r'[ACGTNacgtn]+', line):
-                buf.append(line)
-if buf:
-    lens.append(sum(map(len,buf)))
-
-n50 = 'NA'
-if lens:
-    lens.sort(reverse=True); tot=sum(lens); acc=0
-    for L in lens:
-        acc += L
-        if acc*2 >= tot:
-            n50=str(L)
-            break
-
-print("Dataset\tLanguage\tRuntime\tN50")
-print(f"data4\tpython\t{hms}\t{n50}")
-PY

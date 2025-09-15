@@ -1,0 +1,72 @@
+name: Week 1 (Python: data4)
+on: [push]
+
+jobs:
+  data4:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+
+      - name: Prepare layout and stack
+        run: |
+          set -euxo pipefail
+          mkdir -p week1/test/py
+          ln -sfn ../../data week1/code/genome-assembly/data
+          ulimit -s 8192000
+
+      - name: Run data4 and print results
+        run: |
+          set -euxo pipefail
+          cd week1/code/genome-assembly
+          /usr/bin/time -p python3 main.py data/data4 > ../../test/py/data4.stdout 2> ../../test/py/data4.stderr
+          python3 - <<'PY'
+import re
+from pathlib import Path
+
+out = Path('week1/test/py')
+contigs = Path('week1/data/data4/contig.fasta')
+
+# Parse runtime (seconds) from /usr/bin/time -p stderr
+secs = 'NA'
+if (out/'data4.stderr').exists():
+    for line in (out/'data4.stderr').read_text().splitlines():
+        if line.startswith('real '):
+            secs = line.split()[1]; break
+
+def fmt_hms(sec):
+    try:
+        s=float(sec); h=int(s//3600); s-=h*3600; m=int(s//60); s-=m*60
+        return f"{h}:{m:02d}:{int(round(s)):02d}"
+    except Exception:
+        return sec
+
+# N50 from final contigs FASTA
+lens=[]; buf=[]
+if contigs.exists():
+    with contigs.open('r', errors='ignore') as f:
+        for line in f:
+            t=line.strip()
+            if not t: continue
+            if t.startswith('>'):
+                if buf:
+                    lens.append(sum(map(len,buf))); buf=[]
+            else:
+                if re.fullmatch(r'[ACGTNacgtn]+', t): buf.append(t)
+    if buf: lens.append(sum(map(len,buf)))
+
+n50='NA'
+if lens:
+    lens.sort(reverse=True); tot=sum(lens); acc=0
+    for L in lens:
+        acc+=L
+        if acc*2>=tot:
+            n50=str(L); break
+
+print("Dataset\tLanguage\tRuntime\tN50")
+print(f"data4\tpython\t{fmt_hms(secs)}\t{n50}")
+PY
